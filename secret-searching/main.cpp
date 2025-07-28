@@ -5,11 +5,29 @@
 #include <map>
 #include <algorithm>
 #include <cmath>
+#include <cctype> // for isspace
 
 using namespace std;
 
 typedef long long ll;
 typedef pair<ll, ll> Point;
+
+// ---------- Trim spaces ----------
+string trim(const string &s) {
+    size_t start = 0;
+    while (start < s.length() && isspace(s[start])) start++;
+    size_t end = s.length();
+    while (end > start && isspace(s[end - 1])) end--;
+    return s.substr(start, end - start);
+}
+
+// ---------- Remove surrounding quotes if present ----------
+string removeQuotes(const string& s) {
+    if (s.length() >= 2 && s.front() == '"' && s.back() == '"') {
+        return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
 
 // ---------- Convert base string to decimal ----------
 ll convertToDecimal(const string& value, int base) {
@@ -59,39 +77,80 @@ vector<Point> parseJSON(const string& filename, int& k) {
     vector<Point> points;
 
     while (getline(file, line)) {
+        // Remove all spaces for easier parsing
         line.erase(remove(line.begin(), line.end(), ' '), line.end());
 
+        // Parse "k" value line
         if (line.find("\"k\"") != string::npos) {
             size_t colon = line.find(":");
+            if (colon == string::npos) continue;
             string valStr = line.substr(colon + 1);
             valStr.erase(remove(valStr.begin(), valStr.end(), ','), valStr.end());
+            valStr = trim(valStr);
+            valStr = removeQuotes(valStr);
             try {
                 k = stoi(valStr);
-            } catch (...) {
-                cerr << "❌ Failed to parse k value from: " << valStr << endl;
+            } catch (const exception& e) {
+                cerr << "❌ Failed to parse k value from: " << valStr << " (" << e.what() << ")" << endl;
             }
         }
-        else if (isdigit(line[1])) {
-            string key = line.substr(1, line.find("\"", 1) - 1);
+        // Parse points, expecting format like:
+        // "1":{
+        // "base": "16",
+        // "value": "1a"
+        // }
+        else if (!line.empty() && line[0] == '"' && isdigit(line[1])) {
+            // Extract the key (x-coordinate)
+            size_t quote_end = line.find("\"", 1);
+            if (quote_end == string::npos) continue;
+            string key = line.substr(1, quote_end - 1);
 
+            // Read next two lines for base and value
             string baseLine, valueLine;
-            getline(file, baseLine);
-            getline(file, valueLine);
+            if (!getline(file, baseLine) || !getline(file, valueLine)) {
+                cerr << "❌ Unexpected end of file while reading base/value for x = " << key << endl;
+                break;
+            }
 
-            // Parse base
-            size_t colon = baseLine.find(":");
-            string baseStr = baseLine.substr(colon + 2);
+            // Parse base line
+            size_t colonBase = baseLine.find(":");
+            if (colonBase == string::npos) {
+                cerr << "❌ Invalid base line format: " << baseLine << endl;
+                continue;
+            }
+            string baseStr = baseLine.substr(colonBase + 1);
             baseStr.erase(remove(baseStr.begin(), baseStr.end(), ','), baseStr.end());
-            int base = stoi(baseStr);
+            baseStr = trim(baseStr);
+            baseStr = removeQuotes(baseStr);
 
-            // Parse value
-            colon = valueLine.find(":");
-            string value = valueLine.substr(colon + 2);
-            value.erase(remove(value.begin(), value.end(), '"'), value.end());
+            int base = 10;
+            try {
+                base = stoi(baseStr);
+            } catch (const exception& e) {
+                cerr << "❌ Failed to parse base from: " << baseStr << " (" << e.what() << ")" << endl;
+                continue;
+            }
+
+            // Parse value line
+            size_t colonValue = valueLine.find(":");
+            if (colonValue == string::npos) {
+                cerr << "❌ Invalid value line format: " << valueLine << endl;
+                continue;
+            }
+            string value = valueLine.substr(colonValue + 1);
             value.erase(remove(value.begin(), value.end(), ','), value.end());
+            value = trim(value);
+            value = removeQuotes(value);
 
-            ll x = stoll(key);
-            ll y = convertToDecimal(value, base);
+            // Convert key and value
+            ll x = 0, y = 0;
+            try {
+                x = stoll(key);
+            } catch (const exception& e) {
+                cerr << "❌ Failed to parse x key from: " << key << " (" << e.what() << ")" << endl;
+                continue;
+            }
+            y = convertToDecimal(value, base);
 
             cout << "Parsed: x = " << x << ", y = " << y << " (base " << base << ")" << endl;
 
@@ -124,12 +183,13 @@ ll findSecretUsingCombinations(const vector<Point>& points, int k) {
 
     } while (next_permutation(indices.begin(), indices.end()));
 
-    // Get most frequent result
-    ll maxVal = 0, maxCount = 0;
-    for (map<ll, int>::iterator it = countMap.begin(); it != countMap.end(); ++it) {
-        if (it->second > maxCount) {
-            maxCount = it->second;
-            maxVal = it->first;
+    // Get most frequent value
+    ll maxVal = 0;
+    int maxCount = 0;
+    for (const auto& pr : countMap) {
+        if (pr.second > maxCount) {
+            maxCount = pr.second;
+            maxVal = pr.first;
         }
     }
 
@@ -142,16 +202,20 @@ int main() {
 
     cout << "\n----- Testcase 1 -----\n";
     vector<Point> t1 = parseJSON("testcase1.json", k1);
-    if (!t1.empty()) {
+    if (!t1.empty() && k1 > 0) {
         ll secret1 = findSecretUsingCombinations(t1, k1);
         cout << "✅ Secret for Testcase 1: " << secret1 << "\n";
+    } else {
+        cout << "❌ Could not find valid data for Testcase 1\n";
     }
 
     cout << "\n----- Testcase 2 -----\n";
     vector<Point> t2 = parseJSON("testcase2.json", k2);
-    if (!t2.empty()) {
+    if (!t2.empty() && k2 > 0) {
         ll secret2 = findSecretUsingCombinations(t2, k2);
         cout << "✅ Secret for Testcase 2: " << secret2 << "\n";
+    } else {
+        cout << "❌ Could not find valid data for Testcase 2\n";
     }
 
     return 0;
